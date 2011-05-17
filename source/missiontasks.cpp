@@ -82,49 +82,52 @@ void analyzeRoom(uint8_t* map1, uint8_t* map2, uint8_t* dist_map, uint16_t* head
 		heading_map[index] = 0;
 		dist_map[index] = 0;
 	}
-	while (dist_map[(MAX_PLAQUE_CNT-1)] == 0){
-		// look for the difference in the room
-		for (uint8_t index = 0; index < 200; index++){
-			result = map1[index] - map2[index];
-			result = abs(result);
-			// look for large differences
-			if (result > ROOM_DIFFERENCE_AMOUNT){
-				// the amount of consecutive large differences indicated a plaque
-				consecutive_cnt++;
-				if ((consecutive_cnt == ROOM_CONSECUTIVE_CNT) && (result_cnt < MAX_PLAQUE_CNT)){
-					// store the heading to this plaque (degrees * 10)
-					dist_map[result_cnt] = map2[index];
-					heading_map[result_cnt] = index*18;
-					// look for the max amount of plaques
-					result_cnt++;
-					// dont get the same object twice
-					index += 15;
-					consecutive_cnt = 0;
-				}
-			}
-			else{
+	// look for the difference in the room
+	for (uint8_t index = 0; index < 200; index++){
+		result = map1[index] - map2[index];
+		result = abs(result);
+		// look for large differences
+		if (result > ROOM_DIFFERENCE_AMOUNT){
+			// the amount of consecutive large differences indicated a plaque
+			consecutive_cnt++;
+			if ((consecutive_cnt == ROOM_CONSECUTIVE_CNT) && (result_cnt < MAX_PLAQUE_CNT)){
+				// store the heading to this plaque (degrees * 10)
+				dist_map[result_cnt] = map2[index];
+				heading_map[result_cnt] = index*18;
+				// look for the max amount of plaques
+				result_cnt++;
+				// dont get the same object twice
+				index += 36;
 				consecutive_cnt = 0;
 			}
 		}
-		// convert angles referenced from 0 to angles referenced to angle[n-1]
-		for (uint8_t loop = 4; loop != 0; loop--){
-			// convert to absolute angle from home to the angle between the last plaque can current
-			if (heading_map[loop] != 0){
-				heading_map[loop] = heading_map[loop] - heading_map[(loop-1)];
-			}
+		else{
+			consecutive_cnt = 0;
 		}
-		// next time only look for n-1 consecutive differences
-		//ROOM_CONSECUTIVE_CNT--;
-		// nothing at all
-		//if (ROOM_CONSECUTIVE_CNT == 1){
-		//	ROOM_CONSECUTIVE_CNT = 4;
-		//	ROOM_DIFFERENCE_AMOUNT -= 5;
-		//	if (ROOM_DIFFERENCE_AMOUNT == 0){
-		//		while(1);
-		//	}
-		//	
-		//}
-	}					
+	}
+	// just hang here if all plaques arent found
+	if (dist_map[(MAX_PLAQUE_CNT-1)] == 0){
+		while(1);
+	}
+	// next time only look for n-1 consecutive differences
+	//ROOM_CONSECUTIVE_CNT--;
+	// nothing at all
+	//if (ROOM_CONSECUTIVE_CNT == 1){
+	//	ROOM_CONSECUTIVE_CNT = 4;
+	//	ROOM_DIFFERENCE_AMOUNT -= 5;
+	//	if (ROOM_DIFFERENCE_AMOUNT == 0){
+	//		while(1);
+	//	}
+	//	
+	//}
+	//}	
+	// convert angles referenced from 0 to angles referenced to angle[n-1]
+	for (uint8_t loop=4; loop != 0; loop--){
+		// convert to absolute angle from home to the angle between the last plaque can current
+		if (heading_map[loop] != 0){
+			heading_map[loop] = heading_map[loop] - heading_map[(loop-1)];
+		}
+	}				
 }
 
 void findPlaqueDistanceAngle(uint8_t* dist, uint16_t* angle, uint8_t plaque_num, uint8_t& plaque_dist, uint16_t& plaque_angle)
@@ -152,28 +155,37 @@ void findPlaqueDistanceAngle(uint8_t* dist, uint16_t* angle, uint8_t plaque_num,
 extern char* print;
 void adjustHeading(uint16_t angle)
 {
- 	// make sure the heading is valid
+	// proportional error for speed management
+	uint16_t p_err = 0;
+	//exits only once the offset angle is reached
+  	uint16_t target_offset = compass.getHeading();
+	// make sure the heading is valid
 	while (angle > 3599){
 		angle -= 3600;
 	}
-	sprintf(print, "looking for - %d \n", (angle/10));
-	Serial.write(print);
-	memset(print, 0, 64);
-	// set the motors to the same speed
-	motor_r.setSpeed(150);
-  	motor_l.setSpeed(150);
-  	// one should go forward and another backwards
-  	motor_r.run(FORWARD);
-  	motor_l.run(BACKWARD);
- 	//exits only once the offset angle is reached
-  	int targetOffset = compass.getHeading();
-  
+	//sprintf(print, "looking for - %d \n", (angle/10));
+	//Serial.write(print);
+	//memset(print, 0, 64);
   	// keep looping until we are less than 5 degrees off
 	// from desired setting 
-	while(abs(angle - targetOffset) > 50){
-    	targetOffset = compass.getHeading();
+	while(abs(angle - target_offset) > 50){
+    	target_offset = compass.getHeading();
+		p_err = abs(angle - target_offset);
+		p_err = constrain(p_err, 75, 150);
+		// set the motors to the same speed
+		motor_r.setSpeed(p_err);
+  		motor_l.setSpeed(p_err);
+		if (target_offset > angle){
+			// one should go forward and another backwards
+  			motor_r.run(BACKWARD);
+  			motor_l.run(FORWARD);  
+		}
+		else if (target_offset < angle){
+			// one should go forward and another backwards
+  			motor_r.run(FORWARD);
+  			motor_l.run(BACKWARD);
+		}
   	}
-  	delay(50);
   	//once desired heading is found turn motors off
   	motor_l.run(RELEASE);
   	motor_r.run(RELEASE);
@@ -336,6 +348,7 @@ void fineTuneMJ(uint8_t dist, uint16_t angle)
 {
 	// only move half of the desired angle at a time
 	uint16_t offset_angle = 0;
+	uint8_t consec_hits = 0;
 	int16_t err = 0;
 	uint16_t next_step = 0;
 	uint16_t ang = angle/2;
@@ -349,7 +362,7 @@ void fineTuneMJ(uint8_t dist, uint16_t angle)
 	err = abs(err);
 	// find the plaque
 	while(err > ROOM_DIFFERENCE_AMOUNT){
-		while(err > ROOM_DIFFERENCE_AMOUNT){
+		while((err > ROOM_DIFFERENCE_AMOUNT) && (consec_hits > 3)){
 			// lock onto the target
 			next_step = adjustScanPlatform(0) + 1;
 			adjustScanPlatform(next_step, 1);
@@ -358,6 +371,13 @@ void fineTuneMJ(uint8_t dist, uint16_t angle)
 			err -= dist;
 			err = abs(err);
 			delay(100);
+			// look for a solid object - not noise
+			if (err > ROOM_DIFFERENCE_AMOUNT){
+				consec_hits++;
+			}
+			else{
+				consec_hits = 0;
+			}
 		}
 		// prepare for the next shimmy shake
 		ang = adjustScanPlatform(0)*18;
@@ -373,5 +393,5 @@ void fineTuneMJ(uint8_t dist, uint16_t angle)
 		err = abs(err);
 	}
 	// miss the target to the right
-	adjustHeading((offset_angle+100));
+	adjustHeading((offset_angle+50));
 }

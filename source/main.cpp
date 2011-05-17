@@ -72,8 +72,18 @@ void loop (void)
 	analyzeRoom(room_map1, room_map2, dist_map, angle_map);
 	// get the current heading
 	heading = compass.getHeading();
-	// turn to the first object
+	// show us what you found
+	uint16_t resl;
+	for (uint8_t tmp=0; tmp<MAX_PLAQUE_CNT; tmp++){
+		resl = angle_map[tmp];
+		resl = resl / 18;
+		adjustScanPlatform(adjustScanPlatform(0)+resl, 1);
+		delay(5000);
+	}
+	// go home
+	adjustScanPlatform(0,1);
 /* OBJECT #1 */
+	// turn to the first object
 	fineTuneMJ(dist_map[0], (heading+angle_map[0]));
 	// get our current heading
 	heading = compass.getHeading();
